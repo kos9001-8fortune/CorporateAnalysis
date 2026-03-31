@@ -119,12 +119,15 @@ async function fetchFromEdinet(q, apiKey) {
   const shArr=Array.isArray(sh)?sh:sh.shareholders||[];
   return edinetToMc(c,finArr,ratArr,shArr);
 }
-async function edinetScreener(apiKey, conditions, industry, limit=50) {
+async function edinetScreener(apiKey, params, industry, limit=50) {
   let u=`/screener?limit=${limit}`;
   if(industry)u+=`&industry=${encodeURIComponent(industry)}`;
-  if(conditions)u+=`&conditions=${encodeURIComponent(JSON.stringify(conditions))}`;
+  // Use shorthand format: roe_gte=15, market_cap_gte=100000000000
+  if(params)Object.entries(params).forEach(([k,v])=>{u+=`&${k}=${v}`;});
   const r=await edinetFetch(u,apiKey);
-  return Array.isArray(r)?r:r.companies||r.results||[];
+  // Response: {data: {companies: [...], total: N}}
+  const d=r.companies||r;
+  return Array.isArray(d)?d:[];
 }
 
 const DISCL = [
@@ -327,11 +330,11 @@ export default function App(){
   },[addCode,mc,edinetKey]);
 
   // ── Bulk import from EDINET DB ──
-  const bulkImportEdinet=useCallback(async(conditions,industry,limit)=>{
+  const bulkImportEdinet=useCallback(async(params,industry,limit)=>{
     if(!edinetKey){alert("EDINET DB APIキーを設定してください");return;}
     setBulkImport({loading:true,results:null,error:null});
     try{
-      const companies=await edinetScreener(edinetKey,conditions,industry,limit);
+      const companies=await edinetScreener(edinetKey,params,industry,limit);
       if(!companies||companies.length===0){setBulkImport({loading:false,results:[],error:"条件に合う企業が見つかりません"});return;}
       const results=[];
       for(const co of companies.slice(0,limit)){
@@ -474,11 +477,11 @@ export default function App(){
           <span style={{fontSize:12,fontWeight:600,color:"#e2e8f0",display:"block",marginBottom:8}}>一括インポート</span>
           <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
             {[
-              {l:"IT 時価総額1000億↑",cond:[{metric:"market_cap",operator:"gte",value:100000000000}],ind:"information-communication",lim:30},
-              {l:"サービス ROE15%↑",cond:[{metric:"roe",operator:"gte",value:0.15}],ind:"service",lim:20},
-              {l:"営利CAGR3年20%↑",cond:[{metric:"oi_cagr_3y",operator:"gte",value:0.20}],ind:null,lim:30},
-              {l:"高配当IT PBR<3",cond:[{metric:"dividend_yield",operator:"gte",value:0.02},{metric:"pbr",operator:"lte",value:3}],ind:"information-communication",lim:20},
-            ].map(p=><button key={p.l} onClick={()=>bulkImportEdinet(p.cond,p.ind,p.lim)} disabled={bulkImport.loading} style={{padding:"5px 10px",borderRadius:6,border:"1px solid #1e293b",background:"#0a0e1a",color:"#94a3b8",fontSize:10,cursor:bulkImport.loading?"wait":"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>{bulkImport.loading?"取得中...":p.l}</button>)}
+              {l:"IT 時価総額1000億↑",p:{market_cap_gte:100000000000},ind:"information-communication",lim:30},
+              {l:"サービス ROE15%↑",p:{roe_gte:15},ind:"service",lim:20},
+              {l:"営利CAGR3年20%↑",p:{oi_cagr_3y_gte:20},ind:null,lim:30},
+              {l:"高配当IT PBR<3",p:{dividend_yield_gte:2,pbr_lte:3},ind:"information-communication",lim:20},
+            ].map(p=><button key={p.l} onClick={()=>bulkImportEdinet(p.p,p.ind,p.lim)} disabled={bulkImport.loading} style={{padding:"5px 10px",borderRadius:6,border:"1px solid #1e293b",background:"#0a0e1a",color:"#94a3b8",fontSize:10,cursor:bulkImport.loading?"wait":"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>{bulkImport.loading?"取得中...":p.l}</button>)}
           </div>
           {bulkImport.results&&<p style={{fontSize:10,color:"#34d399",margin:"8px 0 0"}}>{bulkImport.results.length}社をインポートしました（合計{Object.keys(mc).length}社）</p>}
           {bulkImport.error&&<p style={{fontSize:10,color:"#f87171",margin:"8px 0 0"}}>エラー: {bulkImport.error}</p>}
