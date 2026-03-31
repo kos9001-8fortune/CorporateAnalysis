@@ -1428,7 +1428,7 @@ export default function App(){
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:12}}>
             <div>
               <h2 style={{fontSize:18,fontWeight:700,margin:"0 0 4px"}}>Rule of 40 ランキング</h2>
-              <p style={{fontSize:11,color:"#475569",margin:0}}>売上YoY成長率 + 営業利益率 = Ro40スコア。CAGR3Yとの乖離50pp超は除外。⚠は売上データ3年未満</p>
+              <p style={{fontSize:11,color:"#475569",margin:0}}>売上YoY成長率 + 営業利益率 = Ro40スコア。YoY/CAGR3Y比が2.5x超は除外</p>
             </div>
             <div style={{display:"flex",gap:8,alignItems:"center"}}>
               {edinetKey&&<button onClick={fetchRo40Candidates} disabled={ro40Fetch.loading}
@@ -1444,7 +1444,7 @@ export default function App(){
             </div>
           </div>}
           {(()=>{
-            const DIVERGE_THRESHOLD=50;
+            const DIVERGE_RATIO=2.5;
             const all=Object.values(mc).map(c=>{
               const lr=c.rev[c.rev.length-1],lo=c.op[c.op.length-1];
               const cagr=calcCAGR(c.rev,3);
@@ -1454,10 +1454,10 @@ export default function App(){
               const ro40_cagr=cagr!=null?cagr+opm:null;
               const bestScore=ro40_yoy||ro40_cagr||0;
               const dataYears=c.rev.filter(v=>v>0).length;
-              const divergence=cagr!=null&&yoyGrowth!=null?Math.abs(yoyGrowth-cagr):null;
-              const diverged=divergence!=null&&divergence>DIVERGE_THRESHOLD;
+              const divRatio=cagr!=null&&cagr>0&&yoyGrowth!=null?yoyGrowth/cagr:null;
+              const diverged=divRatio!=null&&(divRatio>DIVERGE_RATIO||divRatio<1/DIVERGE_RATIO);
               const shortData=dataYears<3;
-              return {...c,cagr,yoyGrowth,opm,ro40_yoy,ro40_cagr,bestScore,dataYears,divergence,diverged,shortData};
+              return {...c,cagr,yoyGrowth,opm,ro40_yoy,ro40_cagr,bestScore,dataYears,divRatio,diverged,shortData};
             }).filter(c=>c.bestScore>0);
             const ranked=all.filter(c=>!c.diverged&&!c.shortData).sort((a,b)=>b.bestScore-a.bestScore);
             const flagged=all.filter(c=>c.diverged||c.shortData).sort((a,b)=>b.bestScore-a.bestScore);
@@ -1521,24 +1521,24 @@ export default function App(){
               {flagged.length>0&&<div style={{marginTop:24}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
                   <h3 style={{fontSize:14,fontWeight:600,margin:0,color:"#fbbf24"}}>⚠ 除外銘柄（{flagged.length}社）</h3>
-                  <span style={{fontSize:10,color:"#64748b"}}>YoYとCAGR3Yの乖離が{DIVERGE_THRESHOLD}pp超 or 売上データ3年未満</span>
+                  <span style={{fontSize:10,color:"#64748b"}}>YoY/CAGR3Y比が{DIVERGE_RATIO}倍超 or 売上データ3年未満</span>
                 </div>
                 <div style={{background:"#111827",borderRadius:12,border:"1px solid #fbbf2420",overflow:"hidden"}}>
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
                     <thead><tr style={{borderBottom:"2px solid #1e293b"}}>
-                      {["銘柄","Ro40(YoY)","YoY成長","CAGR3Y","乖離","営利率","理由"].map(h=>
+                      {["銘柄","Ro40(YoY)","YoY成長","CAGR3Y","YoY/CAGR","営利率","理由"].map(h=>
                         <th key={h} style={{padding:"10px 8px",textAlign:"left",fontSize:9,color:"#64748b",fontWeight:600}}>{h}</th>
                       )}
                     </tr></thead>
                     <tbody>{flagged.map(c=>{
-                      const reason=c.shortData?"データ"+c.dataYears+"年分":"乖離"+(c.divergence!=null?c.divergence.toFixed(0)+"pp":"");
+                      const reason=c.shortData?"データ"+c.dataYears+"年分":"YoY/CAGR "+(c.divRatio!=null?c.divRatio.toFixed(1)+"x":"");
                       return <tr key={c.code} style={{borderBottom:"1px solid #1e293b10",cursor:"pointer",opacity:0.6}} onClick={()=>goTo(c.code)}
                         onMouseEnter={e=>{e.currentTarget.style.opacity="1";e.currentTarget.style.background="#1e293b30";}} onMouseLeave={e=>{e.currentTarget.style.opacity="0.6";e.currentTarget.style.background="transparent";}}>
                         <td style={{padding:"8px"}}><span style={{color:"#22d3ee",fontFamily:mono,fontSize:10,marginRight:6}}>{c.code}</span><span style={{fontWeight:500}}>{c.name}</span></td>
                         <td style={{padding:"8px",fontFamily:mono,color:"#fbbf24",fontWeight:700}}>{c.bestScore.toFixed(1)}</td>
                         <td style={{padding:"8px",fontFamily:mono}}>{c.yoyGrowth!=null?c.yoyGrowth.toFixed(1)+"%":"-"}</td>
                         <td style={{padding:"8px",fontFamily:mono}}>{c.cagr!=null?c.cagr.toFixed(1)+"%":"-"}</td>
-                        <td style={{padding:"8px",fontFamily:mono,color:"#f87171"}}>{c.divergence!=null?c.divergence.toFixed(0)+"pp":"-"}</td>
+                        <td style={{padding:"8px",fontFamily:mono,color:"#f87171"}}>{c.divRatio!=null?c.divRatio.toFixed(1)+"x":"-"}</td>
                         <td style={{padding:"8px",fontFamily:mono}}>{c.opm.toFixed(1)}%</td>
                         <td style={{padding:"8px",fontSize:10,color:"#fbbf24"}}>{reason}</td>
                       </tr>;
