@@ -297,7 +297,8 @@ export default function App(){
   const [scrError,setScrError]=useState(null);
   const [scrSelected,setScrSelected]=useState(new Set());
   const [scrImporting,setScrImporting]=useState(false);
-  const [refreshProg,setRefreshProg]=useState(null); // {done:N,total:N,current:"name"} or null
+  const [refreshProg,setRefreshProg]=useState(null);
+  const [ro40Fetch,setRo40Fetch]=useState({loading:false,done:0,total:0}); // {done:N,total:N,current:"name"} or null
   const ref=useRef(null);
   const co=mc[sel];
 
@@ -397,6 +398,56 @@ export default function App(){
     setScrImporting(false);
     alert("✅ "+results.length+"社をインポートしました（合計"+(Object.keys(mc).length+results.length)+"社）");
   },[scrResult,scrSelected,edinetKey,mc]);
+
+  // ── Fetch Ro40 candidates from EDINET DB ──
+  const fetchRo40Candidates=useCallback(async()=>{
+    if(!edinetKey){alert("⚙ 設定からEDINET DB APIキーを入力してください");return;}
+    if(!confirm("EDINET DBから高成長・高収益企業を最大300社取得します。\nAPI消費: 約600-900回\n続行しますか？"))return;
+    setRo40Fetch({loading:true,done:0,total:0});
+    try{
+      // Fetch 3 groups to cast a wide net
+      const batches=[
+        {p:{revenue_growth_gte:20,sort:"revenue_growth",order:"desc"},ind:null,lim:100,label:"売上成長20%+"},
+        {p:{operating_margin_gte:15,sort:"operating_margin",order:"desc"},ind:null,lim:100,label:"営利率15%+"},
+        {p:{roe_gte:20,sort:"roe",order:"desc"},ind:null,lim:100,label:"ROE20%+"},
+      ];
+      let allCompanies=[];
+      const seen=new Set();
+      for(const b of batches){
+        try{
+          const companies=await edinetScreener(edinetKey,b.p,b.ind,b.lim);
+          for(const co of companies){
+            const ec=co.edinet_code||co.edinetCode;
+            if(ec&&!seen.has(ec)){seen.add(ec);allCompanies.push(co);}
+          }
+        }catch(e){console.warn("Batch skip:",b.label,e.message);}
+      }
+      setRo40Fetch({loading:true,done:0,total:allCompanies.length});
+      const results=[];
+      for(let i=0;i<allCompanies.length;i++){
+        const co=allCompanies[i];
+        const ec=co.edinet_code||co.edinetCode;
+        const code=(co.secCode||co.sec_code||"");
+        const dispCode=code.length===5?code.slice(0,4):code;
+        if(mc[dispCode]){setRo40Fetch(p=>({...p,done:i+1}));continue;}
+        try{
+          const [fin,rat]=await Promise.all([
+            edinetFetch("/companies/"+ec+"/financials",edinetKey).catch(()=>[]),
+            edinetFetch("/companies/"+ec+"/ratios",edinetKey).catch(()=>[]),
+          ]);
+          const finArr=Array.isArray(fin)?fin:[];
+          const ratArr=Array.isArray(rat)?rat:[];
+          const d=edinetToMc(co,finArr,ratArr,[]);
+          if(d.rev&&d.rev.length>=2&&d.rev.some(v=>v>0))results.push(d);
+        }catch(e){console.warn("Skip:",co.filer_name||co.filerName,e.message);}
+        setRo40Fetch(p=>({...p,done:i+1}));
+        if(i<allCompanies.length-1)await new Promise(r=>setTimeout(r,80));
+      }
+      setMc(prev=>{const n={...prev};results.forEach(d=>{n[d.code]=d;});return n;});
+      setRo40Fetch({loading:false,done:0,total:0});
+      alert("\u2705 "+results.length+"\u793e\u3092\u65b0\u898f\u30a4\u30f3\u30dd\u30fc\u30c8\uff08\u5408\u8a08"+((Object.keys(mc).length)+results.length)+"\u793e\uff09");
+    }catch(e){setRo40Fetch({loading:false,done:0,total:0});alert("Error: "+e.message);}
+  },[edinetKey,mc]);
 
   // ── Refresh all companies from EDINET DB ──
   const refreshAllCompanies=useCallback(async()=>{
@@ -528,7 +579,7 @@ export default function App(){
   const goTo=c=>{setSel(c);setTab("dashboard");setSr(null);setSq("");setSf(false);};
   const fc=sq?Object.values(mc).filter(c=>c.name.includes(sq)||c.code===sq||c.code.startsWith(sq)||c.nameEn.toLowerCase().includes(sq.toLowerCase())).slice(0,12):[];
   const isScr=/以上|以下|未満|超/.test(sq);
-  const tabs=[{id:"search",l:"検索",i:"⌕"},{id:"dashboard",l:"ダッシュボード",i:"◫"},{id:"chat",l:"AI分析",i:"⬡"},{id:"disclosures",l:"適時開示",i:"◈"},{id:"comps",l:"企業比較",i:"⊞"},{id:"opsurge",l:"利益急伸",i:"⚡"},{id:"screener",l:"銘柄探索",i:"🔍"}];
+  const tabs=[{id:"search",l:"検索",i:"⌕"},{id:"dashboard",l:"ダッシュボード",i:"◫"},{id:"chat",l:"AI分析",i:"⬡"},{id:"disclosures",l:"適時開示",i:"◈"},{id:"comps",l:"企業比較",i:"⊞"},{id:"opsurge",l:"利益急伸",i:"⚡"},{id:"screener",l:"銘柄探索",i:"🔍"},{id:"ro40",l:"Ro40",i:"🏆"}];
   const mono="'JetBrains Mono',monospace";
 
   return(
@@ -1373,6 +1424,97 @@ export default function App(){
             </div>;
           })()}
         </div>)}
+        {tab==="ro40"&&(<div style={{maxWidth:1200,margin:"0 auto"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:12}}>
+            <div>
+              <h2 style={{fontSize:18,fontWeight:700,margin:"0 0 4px"}}>Rule of 40 ランキング</h2>
+              <p style={{fontSize:11,color:"#475569",margin:0}}>売上成長率(CAGR) + 営業利益率 = Ro40スコア。100超えは超ハイパフォーマー</p>
+            </div>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              {edinetKey&&<button onClick={fetchRo40Candidates} disabled={ro40Fetch.loading}
+                style={{padding:"7px 16px",borderRadius:6,border:"none",background:ro40Fetch.loading?"#1e293b":"linear-gradient(135deg,#fbbf24,#f59e0b)",color:ro40Fetch.loading?"#64748b":"#0a0e1a",fontSize:11,fontWeight:700,cursor:ro40Fetch.loading?"wait":"pointer",fontFamily:"inherit"}}>
+                {ro40Fetch.loading?("取得中 "+ro40Fetch.done+"/"+ro40Fetch.total):"🚀 EDINET DBから候補300社取得"}
+              </button>}
+              <span style={{fontSize:10,color:"#64748b"}}>{Object.keys(mc).length}社登録中</span>
+            </div>
+          </div>
+          {ro40Fetch.loading&&<div style={{marginBottom:12}}>
+            <div style={{height:4,background:"#1e293b",borderRadius:2,overflow:"hidden"}}>
+              <div style={{height:"100%",background:"linear-gradient(90deg,#fbbf24,#f59e0b)",borderRadius:2,transition:"width 0.3s",width:ro40Fetch.total>0?(ro40Fetch.done/ro40Fetch.total*100)+"%":"0%"}}/>
+            </div>
+          </div>}
+          {(()=>{
+            const ranked=Object.values(mc).map(c=>{
+              const lr=c.rev[c.rev.length-1],lo=c.op[c.op.length-1];
+              const cagr=calcCAGR(c.rev,3);
+              const yoyGrowth=c.rev.length>=2&&c.rev[c.rev.length-2]>0?((lr/c.rev[c.rev.length-2])-1)*100:null;
+              const opm=lr>0?lo/lr*100:0;
+              const ro40_cagr=cagr!=null?cagr+opm:null;
+              const ro40_yoy=yoyGrowth!=null?yoyGrowth+opm:null;
+              const bestScore=Math.max(ro40_cagr||0,ro40_yoy||0);
+              return {...c,cagr,yoyGrowth,opm,ro40_cagr,ro40_yoy,bestScore};
+            }).filter(c=>c.bestScore>0).sort((a,b)=>b.bestScore-a.bestScore);
+            const tiers=[{min:100,color:"#f59e0b",bg:"#f59e0b15",label:"🏆 Rule of 100+"},{min:60,color:"#22d3ee",bg:"#22d3ee10",label:"⚡ Ro40 60+"},{min:40,color:"#34d399",bg:"#34d39910",label:"✅ Ro40 40+"},{min:0,color:"#64748b",bg:"transparent",label:"📊 Ro40 < 40"}];
+            const tierCounts=tiers.map(t=>({...t,count:ranked.filter(c=>c.bestScore>=t.min&&(t.min===0||ranked.filter(c2=>c2.bestScore>=tiers[tiers.indexOf(t)-1]?.min).length===0||c.bestScore<(tiers[tiers.indexOf(t)-1]?.min||Infinity))).length}));
+            return <div>
+              <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
+                {tiers.map(t=>{const cnt=ranked.filter(c=>t.min===100?c.bestScore>=100:t.min===60?c.bestScore>=60&&c.bestScore<100:t.min===40?c.bestScore>=40&&c.bestScore<60:c.bestScore<40).length;
+                  return <div key={t.min} style={{padding:"10px 16px",borderRadius:8,background:t.bg,border:"1px solid "+t.color+"30",flex:"1 1 150px",minWidth:140}}>
+                    <div style={{fontSize:20,fontWeight:800,color:t.color,fontFamily:mono}}>{cnt}</div>
+                    <div style={{fontSize:10,color:t.color,fontWeight:600}}>{t.label}</div>
+                  </div>;
+                })}
+              </div>
+              <div style={{background:"#111827",borderRadius:12,border:"1px solid #1e293b",overflow:"hidden"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                  <thead><tr style={{borderBottom:"2px solid #1e293b"}}>
+                    {["#","銘柄","Ro40スコア","売上CAGR3Y","YoY成長","営利率","ROE","PER","PSR","時価総額"].map(h=>
+                      <th key={h} style={{padding:"10px 8px",textAlign:h==="#"?"center":"left",fontSize:9,color:"#64748b",fontWeight:600,textTransform:"uppercase"}}>{h}</th>
+                    )}
+                  </tr></thead>
+                  <tbody>{ranked.map((c,i)=>{
+                    const tierColor=c.bestScore>=100?"#f59e0b":c.bestScore>=60?"#22d3ee":c.bestScore>=40?"#34d399":"#64748b";
+                    return <tr key={c.code} style={{borderBottom:"1px solid #1e293b10",cursor:"pointer"}} onClick={()=>goTo(c.code)}
+                      onMouseEnter={e=>e.currentTarget.style.background="#1e293b30"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                      <td style={{padding:"8px",textAlign:"center",fontFamily:mono,fontSize:10,color:tierColor,fontWeight:700}}>{i+1}</td>
+                      <td style={{padding:"8px"}}><span style={{color:"#22d3ee",fontFamily:mono,fontSize:10,marginRight:6}}>{c.code}</span><span style={{fontWeight:500}}>{c.name}</span></td>
+                      <td style={{padding:"8px"}}><div style={{display:"flex",alignItems:"center",gap:6}}>
+                        <div style={{width:60,height:6,background:"#1e293b",borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",background:tierColor,borderRadius:3,width:Math.min(c.bestScore/120*100,100)+"%"}}/></div>
+                        <span style={{fontFamily:mono,fontWeight:700,color:tierColor,fontSize:12}}>{c.bestScore.toFixed(1)}</span>
+                      </div></td>
+                      <td style={{padding:"8px",fontFamily:mono,color:c.cagr!=null&&c.cagr>20?"#34d399":"#e2e8f0"}}>{c.cagr!=null?c.cagr.toFixed(1)+"%":"-"}</td>
+                      <td style={{padding:"8px",fontFamily:mono,color:c.yoyGrowth!=null&&c.yoyGrowth>30?"#34d399":"#e2e8f0"}}>{c.yoyGrowth!=null?c.yoyGrowth.toFixed(1)+"%":"-"}</td>
+                      <td style={{padding:"8px",fontFamily:mono,color:c.opm>20?"#34d399":c.opm<0?"#f87171":"#e2e8f0"}}>{c.opm.toFixed(1)}%</td>
+                      <td style={{padding:"8px",fontFamily:mono,color:c.roe>15?"#34d399":"#e2e8f0"}}>{c.roe}%</td>
+                      <td style={{padding:"8px",fontFamily:mono}}>{c.per===-999?"-":c.per+"x"}</td>
+                      <td style={{padding:"8px",fontFamily:mono}}>{c.psr}x</td>
+                      <td style={{padding:"8px",fontSize:10,color:"#94a3b8"}}>{c.marketCap}</td>
+                    </tr>;
+                  })}</tbody>
+                </table>
+              </div>
+              {ranked.length>0&&<div style={{marginTop:20}}>
+                <h3 style={{fontSize:14,fontWeight:600,marginBottom:12}}>Ro40スコア分布（Top 30）</h3>
+                <svg viewBox="0 0 800 250" style={{width:"100%",background:"#111827",borderRadius:12,border:"1px solid #1e293b"}}>
+                  {ranked.slice(0,30).map((c,i)=>{
+                    const bw=20,gap=6,x=40+i*(bw+gap),maxH=200,h=Math.min(c.bestScore/130*maxH,maxH),y=230-h;
+                    const fill=c.bestScore>=100?"#f59e0b":c.bestScore>=60?"#22d3ee":c.bestScore>=40?"#34d399":"#475569";
+                    return <g key={c.code}>
+                      <rect x={x} y={y} width={bw} height={h} rx={2} fill={fill} opacity={0.8}/>
+                      <text x={x+bw/2} y={y-4} textAnchor="middle" fill={fill} fontSize="8" fontWeight="700">{c.bestScore.toFixed(0)}</text>
+                      <text x={x+bw/2} y={244} textAnchor="middle" fill="#475569" fontSize="6" transform={"rotate(-45,"+(x+bw/2)+",244)"}>{c.name.slice(0,6)}</text>
+                    </g>;
+                  })}
+                  <line x1="40" y1={230-100/130*200} x2="800" y2={230-100/130*200} stroke="#f59e0b" strokeWidth="1" strokeDasharray="4,4" opacity="0.5"/>
+                  <text x="35" y={230-100/130*200+3} textAnchor="end" fill="#f59e0b" fontSize="8">100</text>
+                  <line x1="40" y1={230-40/130*200} x2="800" y2={230-40/130*200} stroke="#34d399" strokeWidth="1" strokeDasharray="4,4" opacity="0.3"/>
+                  <text x="35" y={230-40/130*200+3} textAnchor="end" fill="#34d399" fontSize="8">40</text>
+                </svg>
+              </div>}
+            </div>;
+          })()}
+        </div>)}
+
         {tab==="screener"&&(<div style={{maxWidth:1200,margin:"0 auto"}}>
           <div style={{marginBottom:16}}>
             <h2 style={{fontSize:18,fontWeight:700,margin:"0 0 4px"}}>EDINET DB スクリーニング</h2>
