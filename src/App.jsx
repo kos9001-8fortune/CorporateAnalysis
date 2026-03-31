@@ -81,7 +81,8 @@ async function edinetFetch(path, apiKey) {
   return json.data !== undefined ? json.data : json; // unwrap envelope
 }
 function edinetToMc(co, fin, rat, sh) {
-  const secCode = (co.sec_code||"").replace(/0$/, "") || co.edinet_code;
+  const rawSec = co.sec_code||co.secCode||"";
+  const secCode = (rawSec.length===5 ? rawSec.slice(0,4) : rawSec) || co.edinet_code||co.edinetCode;
   const fS = [...(fin||[])].filter(f=>f.fiscal_year).sort((a,b)=>a.fiscal_year-b.fiscal_year).slice(-5);
   const rAll = [...(rat||[])].filter(r=>r.fiscal_year).sort((a,b)=>b.fiscal_year-a.fiscal_year);
   const rL = rAll[0] || {};
@@ -91,21 +92,23 @@ function edinetToMc(co, fin, rat, sh) {
   const holders=(sh||[]).slice(0,6).map(h=>({name:h.holder_name||h.filer_name||"不明",pct:h.holding_ratio||h.share_ratio||0}));
   const lF=fS[fS.length-1]||{}, lR=oku(lF.revenue)||1;
   const mcv=rL.market_cap?Math.round(rL.market_cap/100000000):(rL.stock_price&&lF.shares_issued?Math.round(rL.stock_price*lF.shares_issued/100000000):0);
-  const pct = v => v!=null ? +(v*100).toFixed(1) : 0; // 0.12 → 12.0
-  return {code:secCode,name:(co.filer_name||co.name||"").replace(/株式会社/g,"").trim(),nameEn:co.name_en||co.filer_name_en||"",sector:co.industry||"不明",
-    price:rL.stock_price||0,change:0,marketCap:mcv>=10000?`${(mcv/10000).toFixed(2)}兆円`:`${mcv.toLocaleString()}億円`,mcv,
-    per:rL.per||-999,pbr:rL.pbr||0,roe:rL.roe!=null?pct(rL.roe):0,divYield:rL.dividend_yield!=null?pct(rL.dividend_yield):0,
+  const pct = v => v!=null ? +(v*100).toFixed(1) : 0;
+  const coName = (co.filer_name||co.filerName||co.name||"").replace(/株式会社/g,"").trim();
+  return {code:secCode,name:coName,nameEn:co.name_en||co.filer_name_en||co.nameEn||"",sector:co.industry||"不明",
+    price:rL.stock_price||fS.slice(-1)[0]?.stock_price||0,change:0,marketCap:mcv>=10000?`${(mcv/10000).toFixed(2)}兆円`:`${mcv.toLocaleString()}億円`,mcv,
+    per:rL.per!=null?+(rL.per).toFixed(1):-999,pbr:rL.pbr!=null?+(rL.pbr).toFixed(2):0,roe:rL.roe!=null?pct(rL.roe):(co.roe?+(co.roe).toFixed(1):0),divYield:rL.dividend_yield!=null?pct(rL.dividend_yield):0,
     psr:lR>0&&mcv>0?+(mcv/lR).toFixed(1):0,evEbitda:rL.ebitda&&mcv?+(mcv*100000000/rL.ebitda).toFixed(1):0,
     fcf:oku(lF.cf_operating)+oku(lF.cf_investing),fcfYield:0,
     roic:rL.roic!=null?pct(rL.roic):0,eqR:rL.equity_ratio!=null?pct(rL.equity_ratio):(rL.equity_ratio_official!=null?pct(rL.equity_ratio_official):0),
-    deR:rL.de_ratio||0,netDebt:rL.net_debt?oku(rL.net_debt):0,icr:0,
+    deR:rL.de_ratio!=null?+(rL.de_ratio).toFixed(2):0,netDebt:rL.net_debt?oku(rL.net_debt):0,icr:0,
     cr:rL.current_ratio!=null?+(rL.current_ratio).toFixed(1):0,qr:0,rev,op,np,yrs,
     segs:[{name:co.industry||"主要事業",pct:100}],holders:holders.length>0?holders:[{name:"情報なし",pct:0}],
-    fetched:Date.now(),source:"EDINET_DB",edinetCode:co.edinet_code};
+    fetched:Date.now(),source:"EDINET_DB",edinetCode:co.edinet_code||co.edinetCode};
 }
 async function fetchFromEdinet(q, apiKey) {
   // search is auth-free, but we pass key anyway
-  const cs=await edinetFetch(`/search?q=${encodeURIComponent(q)}&limit=3`,apiKey);
+  const searchQ=/^\d{4}$/.test(q)?q+'0':q;
+  const cs=await edinetFetch(`/search?q=${encodeURIComponent(searchQ)}&limit=3`,apiKey);
   const arr=Array.isArray(cs)?cs:cs.companies||cs.results||[];
   if(!arr||arr.length===0)throw new Error("企業が見つかりません");
   const c=arr[0],ec=c.edinet_code;
@@ -125,9 +128,10 @@ async function edinetScreener(apiKey, params, industry, limit=50) {
   // Use shorthand format: roe_gte=15, market_cap_gte=100000000000
   if(params)Object.entries(params).forEach(([k,v])=>{u+=`&${k}=${v}`;});
   const r=await edinetFetch(u,apiKey);
-  // Response: {data: {companies: [...], total: N}}
-  const d=r.companies||r;
-  return Array.isArray(d)?d:[];
+  // edinetFetch unwraps {data:X}→X, so r = {companies:[...], total:N}
+  if(r&&r.companies)return r.companies;
+  if(Array.isArray(r))return r;
+  return [];
 }
 
 const DISCL = [
@@ -271,12 +275,19 @@ export default function App(){
   const [plTab,setPlTab]=useState("annual"); // annual | quarterly | margin
   const [mulTab,setMulTab]=useState(["per","psr"]); // toggled multiples
   const [opThresh,setOpThresh]=useState(20); // OP YoY increase threshold (億円)
-  const [edinetKey,setEdinetKey]=useState("");
+  const [edinetKey,setEdinetKey]=useState(()=>{try{return localStorage.getItem("alphaScope_edinetKey")||"";}catch{return "";}});
   const [showSettings,setShowSettings]=useState(false);
   const [bulkImport,setBulkImport]=useState({loading:false,results:null,error:null});
+  const [scrCond,setScrCond]=useState({roe_gte:"",operating_margin_gte:"",revenue_growth_gte:"",oi_cagr_3y_gte:"",dividend_yield_gte:"",equity_ratio_gte:"",per_lte:"",per_gte:"",pbr_lte:"",industry:"",business_tags:"",sort:"roe",order:"desc",limit:"50"});
+  const [scrResult,setScrResult]=useState(null);
+  const [scrLoading,setScrLoading]=useState(false);
+  const [scrError,setScrError]=useState(null);
+  const [scrSelected,setScrSelected]=useState(new Set());
+  const [scrImporting,setScrImporting]=useState(false);
   const ref=useRef(null);
   const co=mc[sel];
 
+  useEffect(()=>{try{if(edinetKey)localStorage.setItem("alphaScope_edinetKey",edinetKey);else localStorage.removeItem("alphaScope_edinetKey");}catch{}},[edinetKey]);
   useEffect(()=>{ref.current?.scrollIntoView({behavior:"smooth"});},[msgs,typing]);
 
   // ── AI Chat (Real Claude API + Web Search) ──
@@ -329,6 +340,49 @@ export default function App(){
     setAddLoading(false);setAddCode("");
   },[addCode,mc,edinetKey]);
 
+  // ── EDINET Screener search ──
+  const runScreener=useCallback(async()=>{
+    if(!edinetKey){alert("⚙ 設定からEDINET DB APIキーを入力してください");return;}
+    setScrLoading(true);setScrError(null);setScrResult(null);setScrSelected(new Set());
+    try{
+      const params={};
+      Object.entries(scrCond).forEach(([k,v])=>{if(v!==""&&k!=="sort"&&k!=="order"&&k!=="limit"&&k!=="industry"&&k!=="business_tags")params[k]=v;});
+      const industry=scrCond.industry||null;
+      if(scrCond.business_tags)params.business_tags=scrCond.business_tags;
+      if(scrCond.sort)params.sort=scrCond.sort;
+      if(scrCond.order)params.order=scrCond.order;
+      const limit=parseInt(scrCond.limit)||50;
+      const companies=await edinetScreener(edinetKey,params,industry,limit);
+      setScrResult(companies);
+    }catch(e){setScrError(e.message);}
+    setScrLoading(false);
+  },[edinetKey,scrCond]);
+
+  // ── Import selected screener results ──
+  const importScreenerResults=useCallback(async()=>{
+    if(!scrResult||scrSelected.size===0)return;
+    setScrImporting(true);
+    const toImport=scrResult.filter((_,i)=>scrSelected.has(i));
+    const results=[];
+    for(const co of toImport){
+      try{
+        const ec=co.edinet_code||co.edinetCode;
+        if(!ec)continue;
+        const [fin,rat]=await Promise.all([
+          edinetFetch(`/companies/${ec}/financials`,edinetKey).catch(()=>[]),
+          edinetFetch(`/companies/${ec}/ratios`,edinetKey).catch(()=>[]),
+        ]);
+        const finArr=Array.isArray(fin)?fin:[];
+        const ratArr=Array.isArray(rat)?rat:[];
+        const d=edinetToMc(co,finArr,ratArr,[]);
+        if(d.rev&&d.rev.length>0&&d.rev.some(v=>v>0))results.push(d);
+      }catch(e){console.warn("Skip:",co.filer_name||co.filerName,e.message);}
+    }
+    setMc(prev=>{const n={...prev};results.forEach(d=>{n[d.code]=d;});return n;});
+    setScrImporting(false);
+    alert(\`✅ \${results.length}社をインポートしました（合計\${Object.keys(mc).length+results.length}社）\`);
+  },[scrResult,scrSelected,edinetKey,mc]);
+
   // ── Bulk import from EDINET DB ──
   const bulkImportEdinet=useCallback(async(params,industry,limit)=>{
     if(!edinetKey){alert("EDINET DB APIキーを設定してください");return;}
@@ -339,7 +393,8 @@ export default function App(){
       const results=[];
       for(const co of companies.slice(0,limit)){
         try{
-          const ec=co.edinet_code;
+          const ec=co.edinet_code||co.edinetCode;
+          if(!ec){console.warn("Skip: no edinetCode",co);continue;}
           const [fin,rat]=await Promise.all([
             edinetFetch(`/companies/${ec}/financials`,edinetKey).catch(()=>[]),
             edinetFetch(`/companies/${ec}/ratios`,edinetKey).catch(()=>[]),
@@ -348,7 +403,7 @@ export default function App(){
           const ratArr=Array.isArray(rat)?rat:[];
           const d=edinetToMc(co,finArr,ratArr,[]);
           if(d.rev&&d.rev.length>0&&d.rev.some(v=>v>0))results.push(d);
-        }catch(e){console.warn("Skip:",co.filer_name||co.name,e.message);}
+        }catch(e){console.warn("Skip:",co.filer_name||co.filerName||co.name,e.message);}
       }
       setMc(prev=>{const n={...prev};results.forEach(d=>{n[d.code]=d;});return n;});
       setBulkImport({loading:false,results,error:null});
@@ -425,11 +480,11 @@ export default function App(){
     }
     setFwdLoading(false);
   },[mc]);
-  const doSearch=e=>{if(e.key!=="Enter")return;const q=sq.trim();if(!q)return;const cd=parseScr(q);if(cd.length>0){setSr(Object.values(mc).filter(co2=>cd.every(cd2=>{const val=co2[cd2.m];return val!==undefined&&(cd2.op===">="?val>=cd2.v:val<=cd2.v);})));setSc(cd);return;}const f=Object.values(mc).find(c=>c.name.includes(q)||c.code===q||c.nameEn.toLowerCase().includes(q.toLowerCase()));if(f){setSel(f.code);setTab("dashboard");setSr(null);setSq("");}};
+  const doSearch=e=>{if(e.key!=="Enter")return;const q=sq.trim();if(!q)return;const cd=parseScr(q);if(cd.length>0){setSr(Object.values(mc).filter(co2=>cd.every(cd2=>{const val=co2[cd2.m];return val!==undefined&&(cd2.op===">="?val>=cd2.v:val<=cd2.v);})));setSc(cd);return;}const f=Object.values(mc).find(c=>c.code===q||c.name===q)||Object.values(mc).find(c=>c.name.includes(q)||c.code.startsWith(q)||c.nameEn.toLowerCase().includes(q.toLowerCase()));if(f){setSel(f.code);setTab("dashboard");setSr(null);setSq("");}};
   const goTo=c=>{setSel(c);setTab("dashboard");setSr(null);setSq("");setSf(false);};
-  const fc=sq?Object.values(mc).filter(c=>c.name.includes(sq)||c.code.includes(sq)||c.nameEn.toLowerCase().includes(sq.toLowerCase())):[];
+  const fc=sq?Object.values(mc).filter(c=>c.name.includes(sq)||c.code===sq||c.code.startsWith(sq)||c.nameEn.toLowerCase().includes(sq.toLowerCase())).slice(0,12):[];
   const isScr=/以上|以下|未満|超/.test(sq);
-  const tabs=[{id:"search",l:"検索",i:"⌕"},{id:"dashboard",l:"ダッシュボード",i:"◫"},{id:"chat",l:"AI分析",i:"⬡"},{id:"disclosures",l:"適時開示",i:"◈"},{id:"comps",l:"企業比較",i:"⊞"},{id:"opsurge",l:"利益急伸",i:"⚡"}];
+  const tabs=[{id:"search",l:"検索",i:"⌕"},{id:"dashboard",l:"ダッシュボード",i:"◫"},{id:"chat",l:"AI分析",i:"⬡"},{id:"disclosures",l:"適時開示",i:"◈"},{id:"comps",l:"企業比較",i:"⊞"},{id:"opsurge",l:"利益急伸",i:"⚡"},{id:"screener",l:"スクリーニング",i:"🔍"}];
   const mono="'JetBrains Mono',monospace";
 
   return(
@@ -1245,6 +1300,130 @@ export default function App(){
             </div>;
           })()}
         </div>)}
+        {tab==="screener"&&(<div style={{maxWidth:1200,margin:"0 auto"}}>
+          <div style={{marginBottom:16}}>
+            <h2 style={{fontSize:18,fontWeight:700,margin:"0 0 4px"}}>EDINET DB スクリーニング</h2>
+            <p style={{fontSize:11,color:"#475569",margin:0}}>EDINET DB APIを使って上場企業3,849社からリアルタイム条件検索</p>
+          </div>
+          {!edinetKey?<div style={{padding:40,textAlign:"center",color:"#475569",background:"#111827",borderRadius:12,border:"1px solid #1e293b"}}>
+            <div style={{fontSize:32,marginBottom:12}}>🔑</div>
+            <p style={{fontSize:14}}>EDINET DB APIキーが未設定です</p>
+            <p style={{fontSize:11,margin:"8px 0 16px"}}>ヘッダーの ⚙ ボタンからAPIキーを入力してください</p>
+            <button onClick={()=>setShowSettings(true)} style={{padding:"8px 20px",borderRadius:8,background:"#22d3ee20",border:"1px solid #22d3ee40",color:"#22d3ee",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>⚙ 設定を開く</button>
+          </div>:<div>
+            <div style={{background:"#111827",borderRadius:12,border:"1px solid #1e293b",padding:20,marginBottom:16}}>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:12,marginBottom:16}}>
+                {[
+                  {k:"roe_gte",l:"ROE ≥",u:"%",p:"15"},
+                  {k:"operating_margin_gte",l:"営業利益率 ≥",u:"%",p:"10"},
+                  {k:"revenue_growth_gte",l:"売上成長率 ≥",u:"%",p:"20"},
+                  {k:"oi_cagr_3y_gte",l:"営利CAGR3年 ≥",u:"%",p:"15"},
+                  {k:"dividend_yield_gte",l:"配当利回り ≥",u:"%",p:"3"},
+                  {k:"equity_ratio_gte",l:"自己資本比率 ≥",u:"%",p:"40"},
+                  {k:"per_lte",l:"PER ≤",u:"倍",p:"20"},
+                  {k:"per_gte",l:"PER ≥",u:"倍",p:"5"},
+                  {k:"pbr_lte",l:"PBR ≤",u:"倍",p:"1"},
+                ].map(f=><div key={f.k} style={{display:"flex",flexDirection:"column",gap:4}}>
+                  <label style={{fontSize:10,color:"#64748b",fontWeight:500}}>{f.l} <span style={{color:"#475569"}}>{f.u}</span></label>
+                  <input type="number" step="any" value={scrCond[f.k]} onChange={e=>setScrCond(p=>({...p,[f.k]:e.target.value}))} placeholder={f.p}
+                    style={{padding:"7px 10px",background:"#0a0e1a",border:"1px solid #1e293b",borderRadius:6,color:"#e2e8f0",fontSize:12,fontFamily:mono,outline:"none",width:"100%"}}/>
+                </div>)}
+              </div>
+              <div style={{display:"flex",gap:12,alignItems:"flex-end",flexWrap:"wrap",marginBottom:16}}>
+                <div style={{flex:"1 1 180px"}}>
+                  <label style={{fontSize:10,color:"#64748b",fontWeight:500,display:"block",marginBottom:4}}>業種</label>
+                  <select value={scrCond.industry} onChange={e=>setScrCond(p=>({...p,industry:e.target.value}))}
+                    style={{padding:"7px 10px",background:"#0a0e1a",border:"1px solid #1e293b",borderRadius:6,color:"#e2e8f0",fontSize:12,fontFamily:"inherit",outline:"none",width:"100%"}}>
+                    <option value="">全業種</option>
+                    {["information-communication","service","electric-appliances","machinery","chemicals","wholesale","retail","construction","real-estate","transportation","banking","securities","insurance","foods","pharmaceutical","metal-products","precision-instruments","textiles","pulp-paper","mining","fishery-agriculture-forestry","other-products","other-financing"].map(v=>
+                      <option key={v} value={v}>{v}</option>
+                    )}
+                  </select>
+                </div>
+                <div style={{flex:"1 1 180px"}}>
+                  <label style={{fontSize:10,color:"#64748b",fontWeight:500,display:"block",marginBottom:4}}>事業タグ</label>
+                  <input value={scrCond.business_tags} onChange={e=>setScrCond(p=>({...p,business_tags:e.target.value}))} placeholder="saas,ai,fintech"
+                    style={{padding:"7px 10px",background:"#0a0e1a",border:"1px solid #1e293b",borderRadius:6,color:"#e2e8f0",fontSize:12,fontFamily:mono,outline:"none",width:"100%"}}/>
+                </div>
+                <div style={{flex:"0 0 100px"}}>
+                  <label style={{fontSize:10,color:"#64748b",fontWeight:500,display:"block",marginBottom:4}}>件数上限</label>
+                  <select value={scrCond.limit} onChange={e=>setScrCond(p=>({...p,limit:e.target.value}))}
+                    style={{padding:"7px 10px",background:"#0a0e1a",border:"1px solid #1e293b",borderRadius:6,color:"#e2e8f0",fontSize:12,fontFamily:"inherit",outline:"none",width:"100%"}}>
+                    {["20","50","100","200","500"].map(v=><option key={v} value={v}>{v}社</option>)}
+                  </select>
+                </div>
+                <div style={{flex:"0 0 120px"}}>
+                  <label style={{fontSize:10,color:"#64748b",fontWeight:500,display:"block",marginBottom:4}}>ソート</label>
+                  <select value={scrCond.sort} onChange={e=>setScrCond(p=>({...p,sort:e.target.value}))}
+                    style={{padding:"7px 10px",background:"#0a0e1a",border:"1px solid #1e293b",borderRadius:6,color:"#e2e8f0",fontSize:12,fontFamily:"inherit",outline:"none",width:"100%"}}>
+                    {[["roe","ROE"],["revenue","売上"],["operating_income","営業利益"],["market_cap","時価総額"],["per","PER"],["pbr","PBR"],["dividend_yield","配当利回り"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+                <span style={{fontSize:10,color:"#64748b",alignSelf:"center"}}>プリセット:</span>
+                {[
+                  {l:"高ROE IT",v:{roe_gte:"15",industry:"information-communication",sort:"roe"}},
+                  {l:"高配当 低PBR",v:{dividend_yield_gte:"3",pbr_lte:"1.5",sort:"dividend_yield"}},
+                  {l:"高成長 SaaS",v:{revenue_growth_gte:"20",business_tags:"saas",sort:"revenue"}},
+                  {l:"割安 高収益",v:{per_lte:"15",roe_gte:"12",operating_margin_gte:"10",sort:"roe"}},
+                  {l:"堅実 高自己資本",v:{equity_ratio_gte:"50",roe_gte:"8",sort:"equity_ratio"}},
+                ].map(p=><button key={p.l} onClick={()=>setScrCond(prev=>({...prev,roe_gte:"",operating_margin_gte:"",revenue_growth_gte:"",oi_cagr_3y_gte:"",dividend_yield_gte:"",equity_ratio_gte:"",per_lte:"",per_gte:"",pbr_lte:"",industry:"",business_tags:"",...p.v}))}
+                  style={{padding:"5px 12px",borderRadius:6,border:"1px solid #1e293b",background:"#0a0e1a",color:"#94a3b8",fontSize:10,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>{p.l}</button>)}
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={runScreener} disabled={scrLoading}
+                  style={{padding:"10px 28px",borderRadius:8,border:"none",background:scrLoading?"#1e293b":"linear-gradient(135deg,#22d3ee,#a78bfa)",color:scrLoading?"#64748b":"#0a0e1a",fontSize:13,fontWeight:700,cursor:scrLoading?"wait":"pointer",fontFamily:"inherit"}}>
+                  {scrLoading?"検索中...":"🔍 スクリーニング実行"}
+                </button>
+                <button onClick={()=>{setScrCond({roe_gte:"",operating_margin_gte:"",revenue_growth_gte:"",oi_cagr_3y_gte:"",dividend_yield_gte:"",equity_ratio_gte:"",per_lte:"",per_gte:"",pbr_lte:"",industry:"",business_tags:"",sort:"roe",order:"desc",limit:"50"});setScrResult(null);setScrError(null);}}
+                  style={{padding:"10px 20px",borderRadius:8,border:"1px solid #1e293b",background:"transparent",color:"#64748b",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>条件クリア</button>
+              </div>
+            </div>
+            {scrError&&<div style={{padding:12,background:"#f8717115",borderRadius:8,border:"1px solid #f8717130",color:"#f87171",fontSize:12,marginBottom:16}}>エラー: {scrError}</div>}
+            {scrResult&&<div style={{background:"#111827",borderRadius:12,border:"1px solid #1e293b",overflow:"hidden"}}>
+              <div style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid #1e293b"}}>
+                <span style={{fontSize:12,color:"#22d3ee",fontWeight:600}}>{scrResult.length}社ヒット</span>
+                <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <button onClick={()=>{const all=new Set(scrResult.map((_,i)=>i));setScrSelected(prev=>prev.size===scrResult.length?new Set():all);}}
+                    style={{padding:"4px 10px",borderRadius:4,border:"1px solid #1e293b",background:"transparent",color:"#94a3b8",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>{scrSelected.size===scrResult.length?"全解除":"全選択"}</button>
+                  <button onClick={importScreenerResults} disabled={scrImporting||scrSelected.size===0}
+                    style={{padding:"4px 12px",borderRadius:4,border:"none",background:scrSelected.size>0?"#22d3ee20":"#1e293b",color:scrSelected.size>0?"#22d3ee":"#475569",fontSize:10,fontWeight:600,cursor:scrSelected.size>0?"pointer":"default",fontFamily:"inherit"}}>
+                    {scrImporting?`取得中...`:`選択した${scrSelected.size}社をインポート`}
+                  </button>
+                </div>
+              </div>
+              {scrResult.length===0?<div style={{padding:40,textAlign:"center",color:"#475569"}}>条件に合う企業が見つかりませんでした</div>:
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                <thead><tr style={{borderBottom:"2px solid #1e293b"}}>
+                  <th style={{padding:"10px 8px",width:32}}></th>
+                  {["証券コード","企業名","業種","ROE","PER","PBR","配当","決算期"].map(h=>
+                    <th key={h} style={{padding:"10px 8px",textAlign:"left",fontSize:9,color:"#64748b",fontWeight:600,textTransform:"uppercase"}}>{h}</th>
+                  )}
+                </tr></thead>
+                <tbody>{scrResult.map((co,idx)=>{
+                  const code=(co.secCode||co.sec_code||"");
+                  const dispCode=code.length===5?code.slice(0,4):code;
+                  const name=(co.filerName||co.filer_name||co.name||"").replace(/株式会社/g,"").trim();
+                  const isInMc=mc[dispCode]!==undefined;
+                  return <tr key={idx} style={{borderBottom:"1px solid #1e293b10",opacity:isInMc?0.5:1,cursor:"pointer"}} onClick={()=>setScrSelected(prev=>{const n=new Set(prev);n.has(idx)?n.delete(idx):n.add(idx);return n;})}
+                    onMouseEnter={e=>e.currentTarget.style.background="#1e293b30"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                    <td style={{padding:"8px",textAlign:"center"}}><input type="checkbox" checked={scrSelected.has(idx)} readOnly style={{accentColor:"#22d3ee"}}/></td>
+                    <td style={{padding:"8px",fontFamily:mono,color:"#22d3ee",fontSize:11}}>{dispCode}</td>
+                    <td style={{padding:"8px",fontWeight:500}}>{name}{isInMc&&<span style={{marginLeft:6,fontSize:9,color:"#475569",background:"#1e293b",padding:"1px 5px",borderRadius:3}}>登録済</span>}</td>
+                    <td style={{padding:"8px",color:"#94a3b8",fontSize:10}}>{co.industry||"-"}</td>
+                    <td style={{padding:"8px",fontFamily:mono,color:co.roe>15?"#34d399":co.roe>8?"#e2e8f0":"#f87171"}}>{co.roe!=null?co.roe.toFixed?co.roe.toFixed(1):co.roe:"-"}%</td>
+                    <td style={{padding:"8px",fontFamily:mono}}>{co.per!=null?co.per.toFixed?co.per.toFixed(1):co.per:"-"}x</td>
+                    <td style={{padding:"8px",fontFamily:mono,color:co.pbr<1?"#34d399":"#e2e8f0"}}>{co.pbr!=null?co.pbr.toFixed?co.pbr.toFixed(2):co.pbr:"-"}x</td>
+                    <td style={{padding:"8px",fontFamily:mono}}>{co.dividend_yield!=null?(co.dividend_yield.toFixed?co.dividend_yield.toFixed(1):co.dividend_yield):"-"}%</td>
+                    <td style={{padding:"8px",color:"#64748b",fontSize:10}}>{co.fiscalYear||co.fiscal_year||"-"}</td>
+                  </tr>;
+                })}</tbody>
+              </table>}
+            </div>}
+          </div>}
+        </div>)}
+
       </main>
 
       <style>{`
