@@ -260,7 +260,7 @@ function QuarterlyView({q, mono}) {
 const impS={high:{bg:"#dc262620",c:"#f87171",t:"重要"},medium:{bg:"#eab30820",c:"#fbbf24",t:"中"},low:{bg:"#22d3ee15",c:"#22d3ee",t:"低"}};
 
 export default function App(){
-  const [mc,setMc]=useState(MC);
+  const [mc,setMc]=useState(()=>{try{const s=localStorage.getItem("alphaScope_mc");if(s){const p=JSON.parse(s);if(Object.keys(p).length>=Object.keys(MC).length)return p;const merged={...MC,...p};return merged;}}catch{}return MC;});
   const [tab,setTab]=useState("search");
   const [sel,setSel]=useState("7203");
   const [msgs,setMsgs]=useState([{role:"assistant",content:"こんにちは。AlphaScope AIです。\n\n企業分析について何でも聞いてください。Web検索で最新情報を取得して回答します。\n\n例:\n• 「トヨタの最新決算を分析して」\n• 「ナイルの成長性を評価して」\n• 「SaaS企業のROE比較」"}]);
@@ -297,10 +297,12 @@ export default function App(){
   const [scrError,setScrError]=useState(null);
   const [scrSelected,setScrSelected]=useState(new Set());
   const [scrImporting,setScrImporting]=useState(false);
+  const [refreshProg,setRefreshProg]=useState(null); // {done:N,total:N,current:"name"} or null
   const ref=useRef(null);
   const co=mc[sel];
 
   useEffect(()=>{try{if(edinetKey)localStorage.setItem("alphaScope_edinetKey",edinetKey);else localStorage.removeItem("alphaScope_edinetKey");}catch{}},[edinetKey]);
+  useEffect(()=>{try{localStorage.setItem("alphaScope_mc",JSON.stringify(mc));}catch{}},[mc]);
   useEffect(()=>{ref.current?.scrollIntoView({behavior:"smooth"});},[msgs,typing]);
 
   // ── AI Chat (Real Claude API + Web Search) ──
@@ -395,6 +397,35 @@ export default function App(){
     setScrImporting(false);
     alert("✅ "+results.length+"社をインポートしました（合計"+(Object.keys(mc).length+results.length)+"社）");
   },[scrResult,scrSelected,edinetKey,mc]);
+
+  // ── Refresh all companies from EDINET DB ──
+  const refreshAllCompanies=useCallback(async()=>{
+    if(!edinetKey){alert("⚙ 設定からEDINET DB APIキーを入力してください");return;}
+    const codes=Object.keys(mc);
+    const total=codes.length;
+    if(!confirm("全"+total+"社のデータをEDINET DB APIで更新します。\nAPI消費: 約"+(total*3)+"回\n続行しますか？"))return;
+    setRefreshProg({done:0,total,current:"開始中..."});
+    let updated=0,failed=0;
+    for(let i=0;i<codes.length;i++){
+      const code=codes[i];
+      const c=mc[code];
+      setRefreshProg({done:i,total,current:c.name||code});
+      try{
+        const d=await fetchFromEdinet(code,edinetKey);
+        if(d&&d.rev&&d.rev.length>0&&d.rev.some(v=>v>0)){
+          setMc(prev=>({...prev,[d.code]:{...prev[d.code],...d,fetched:Date.now()}}));
+          updated++;
+        }else{failed++;}
+      }catch(e){
+        console.warn("Refresh skip:",code,c.name,e.message);
+        failed++;
+      }
+      // Rate limit: 100ms between requests
+      if(i<codes.length-1)await new Promise(r=>setTimeout(r,100));
+    }
+    setRefreshProg(null);
+    alert("✅ 更新完了: "+updated+"社成功 / "+failed+"社スキップ");
+  },[edinetKey,mc]);
 
   // ── Bulk import from EDINET DB ──
   const bulkImportEdinet=useCallback(async(params,industry,limit)=>{
@@ -553,6 +584,27 @@ export default function App(){
           </div>
           {bulkImport.results&&<p style={{fontSize:10,color:"#34d399",margin:"8px 0 0"}}>{bulkImport.results.length}社をインポートしました（合計{Object.keys(mc).length}社）</p>}
           {bulkImport.error&&<p style={{fontSize:10,color:"#f87171",margin:"8px 0 0"}}>エラー: {bulkImport.error}</p>}
+        </div>}
+        {edinetKey&&<div style={{flex:"1 1 400px"}}>
+          <span style={{fontSize:12,fontWeight:600,color:"#e2e8f0",display:"block",marginBottom:8}}>データ更新</span>
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+            <button onClick={refreshAllCompanies} disabled={!!refreshProg}
+              style={{padding:"7px 16px",borderRadius:6,border:"none",background:refreshProg?"#1e293b":"linear-gradient(135deg,#34d399,#22d3ee)",color:refreshProg?"#64748b":"#0a0e1a",fontSize:11,fontWeight:700,cursor:refreshProg?"wait":"pointer",fontFamily:"inherit"}}>
+              {refreshProg?"更新中...":"🔄 全"+Object.keys(mc).length+"社を最新データに更新"}
+            </button>
+            <button onClick={()=>{if(confirm("localStorageのデータを初期化しますか？\nハードコードされた初期データに戻ります。")){try{localStorage.removeItem("alphaScope_mc");setMc(MC);alert("✅ 初期化しました");}catch{}}}}
+              style={{padding:"7px 12px",borderRadius:6,border:"1px solid #1e293b",background:"transparent",color:"#64748b",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>初期化</button>
+          </div>
+          {refreshProg&&<div style={{marginTop:8}}>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:"#94a3b8",marginBottom:4}}>
+              <span>{refreshProg.current}</span>
+              <span>{refreshProg.done}/{refreshProg.total}</span>
+            </div>
+            <div style={{height:4,background:"#1e293b",borderRadius:2,overflow:"hidden"}}>
+              <div style={{height:"100%",background:"linear-gradient(90deg,#22d3ee,#34d399)",borderRadius:2,transition:"width 0.3s",width:(refreshProg.done/refreshProg.total*100)+"%"}}/>
+            </div>
+          </div>}
+          <p style={{fontSize:9,color:"#475569",margin:"6px 0 0"}}>EDINET DB APIで全社の業績・指標を最新に更新（API消費: 約{Object.keys(mc).length*3}回）</p>
         </div>}
       </div>}
 
