@@ -380,7 +380,7 @@ export default function App(){
     }
     setMc(prev=>{const n={...prev};results.forEach(d=>{n[d.code]=d;});return n;});
     setScrImporting(false);
-    alert(\`✅ \${results.length}社をインポートしました（合計\${Object.keys(mc).length+results.length}社）\`);
+    alert("✅ "+results.length+"社をインポートしました（合計"+(Object.keys(mc).length+results.length)+"社）");
   },[scrResult,scrSelected,edinetKey,mc]);
 
   // ── Bulk import from EDINET DB ──
@@ -484,7 +484,7 @@ export default function App(){
   const goTo=c=>{setSel(c);setTab("dashboard");setSr(null);setSq("");setSf(false);};
   const fc=sq?Object.values(mc).filter(c=>c.name.includes(sq)||c.code===sq||c.code.startsWith(sq)||c.nameEn.toLowerCase().includes(sq.toLowerCase())).slice(0,12):[];
   const isScr=/以上|以下|未満|超/.test(sq);
-  const tabs=[{id:"search",l:"検索",i:"⌕"},{id:"dashboard",l:"ダッシュボード",i:"◫"},{id:"chat",l:"AI分析",i:"⬡"},{id:"disclosures",l:"適時開示",i:"◈"},{id:"comps",l:"企業比較",i:"⊞"},{id:"opsurge",l:"利益急伸",i:"⚡"},{id:"screener",l:"スクリーニング",i:"🔍"}];
+  const tabs=[{id:"search",l:"検索",i:"⌕"},{id:"dashboard",l:"ダッシュボード",i:"◫"},{id:"chat",l:"AI分析",i:"⬡"},{id:"disclosures",l:"適時開示",i:"◈"},{id:"comps",l:"企業比較",i:"⊞"},{id:"opsurge",l:"利益急伸",i:"⚡"},{id:"screener",l:"銘柄探索",i:"🔍"}];
   const mono="'JetBrains Mono',monospace";
 
   return(
@@ -498,8 +498,8 @@ export default function App(){
           <span style={{fontSize:15,fontWeight:700,letterSpacing:"-0.02em"}}>AlphaScope</span>
           <span style={{fontSize:9,color:"#22d3ee",background:"#22d3ee15",padding:"2px 6px",borderRadius:4,fontWeight:600}}>BETA</span>
         </div>
-        <nav style={{display:"flex",gap:2,marginLeft:12}}>
-          {tabs.map(t=><button key={t.id} onClick={()=>{setTab(t.id);if(t.id==="search")setSr(null);}} style={{padding:"5px 12px",borderRadius:6,border:"none",cursor:"pointer",fontSize:11,fontWeight:500,fontFamily:"inherit",background:tab===t.id?"#22d3ee18":"transparent",color:tab===t.id?"#22d3ee":"#64748b",display:"flex",alignItems:"center",gap:4}}><span style={{fontSize:10}}>{t.i}</span>{t.l}</button>)}
+        <nav style={{display:"flex",gap:2,marginLeft:12,flex:1,minWidth:0,overflowX:"auto",scrollbarWidth:"none"}}>
+          {tabs.map(t=><button key={t.id} onClick={()=>{setTab(t.id);if(t.id==="search")setSr(null);}} style={{padding:"5px 12px",borderRadius:6,border:"none",cursor:"pointer",fontSize:11,fontWeight:500,fontFamily:"inherit",background:tab===t.id?"#22d3ee18":"transparent",color:tab===t.id?"#22d3ee":"#64748b",display:"flex",alignItems:"center",gap:4,whiteSpace:"nowrap",flexShrink:0}}><span style={{fontSize:10}}>{t.i}</span>{t.l}</button>)}
         </nav>
         <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:8}}>
           <div style={{display:"flex",alignItems:"center",gap:4,background:"#111827",borderRadius:8,border:"1px solid #1e293b",padding:"0 4px 0 10px"}}>
