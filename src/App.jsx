@@ -1428,7 +1428,7 @@ export default function App(){
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:12}}>
             <div>
               <h2 style={{fontSize:18,fontWeight:700,margin:"0 0 4px"}}>Rule of 40 ランキング</h2>
-              <p style={{fontSize:11,color:"#475569",margin:0}}>売上成長率(CAGR) + 営業利益率 = Ro40スコア。100超えは超ハイパフォーマー</p>
+              <p style={{fontSize:11,color:"#475569",margin:0}}>売上成長率(3Y CAGR) + 営業利益率 = Ro40スコア。100超えは超ハイパフォーマー。⚠は売上データ3年未満</p>
             </div>
             <div style={{display:"flex",gap:8,alignItems:"center"}}>
               {edinetKey&&<button onClick={fetchRo40Candidates} disabled={ro40Fetch.loading}
@@ -1450,9 +1450,10 @@ export default function App(){
               const yoyGrowth=c.rev.length>=2&&c.rev[c.rev.length-2]>0?((lr/c.rev[c.rev.length-2])-1)*100:null;
               const opm=lr>0?lo/lr*100:0;
               const ro40_cagr=cagr!=null?cagr+opm:null;
-              const ro40_yoy=yoyGrowth!=null?yoyGrowth+opm:null;
-              const bestScore=Math.max(ro40_cagr||0,ro40_yoy||0);
-              return {...c,cagr,yoyGrowth,opm,ro40_cagr,ro40_yoy,bestScore};
+              const bestScore=ro40_cagr||0;
+              const dataYears=c.rev.filter(v=>v>0).length;
+              const flag=dataYears<3?"⚠":"";
+              return {...c,cagr,yoyGrowth,opm,ro40_cagr,bestScore,dataYears,flag};
             }).filter(c=>c.bestScore>0).sort((a,b)=>b.bestScore-a.bestScore);
             const tiers=[{min:100,color:"#f59e0b",bg:"#f59e0b15",label:"🏆 Rule of 100+"},{min:60,color:"#22d3ee",bg:"#22d3ee10",label:"⚡ Ro40 60+"},{min:40,color:"#34d399",bg:"#34d39910",label:"✅ Ro40 40+"},{min:0,color:"#64748b",bg:"transparent",label:"📊 Ro40 < 40"}];
             const tierCounts=tiers.map(t=>({...t,count:ranked.filter(c=>c.bestScore>=t.min&&(t.min===0||ranked.filter(c2=>c2.bestScore>=tiers[tiers.indexOf(t)-1]?.min).length===0||c.bestScore<(tiers[tiers.indexOf(t)-1]?.min||Infinity))).length}));
@@ -1477,7 +1478,7 @@ export default function App(){
                     return <tr key={c.code} style={{borderBottom:"1px solid #1e293b10",cursor:"pointer"}} onClick={()=>goTo(c.code)}
                       onMouseEnter={e=>e.currentTarget.style.background="#1e293b30"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                       <td style={{padding:"8px",textAlign:"center",fontFamily:mono,fontSize:10,color:tierColor,fontWeight:700}}>{i+1}</td>
-                      <td style={{padding:"8px"}}><span style={{color:"#22d3ee",fontFamily:mono,fontSize:10,marginRight:6}}>{c.code}</span><span style={{fontWeight:500}}>{c.name}</span></td>
+                      <td style={{padding:"8px"}}><span style={{color:"#22d3ee",fontFamily:mono,fontSize:10,marginRight:6}}>{c.code}</span><span style={{fontWeight:500}}>{c.name}</span>{c.flag&&<span style={{marginLeft:6,fontSize:9,color:"#fbbf24"}} title={"売上データ"+c.dataYears+"年分のみ"}>{c.flag}</span>}</td>
                       <td style={{padding:"8px"}}><div style={{display:"flex",alignItems:"center",gap:6}}>
                         <div style={{width:60,height:6,background:"#1e293b",borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",background:tierColor,borderRadius:3,width:Math.min(c.bestScore/120*100,100)+"%"}}/></div>
                         <span style={{fontFamily:mono,fontWeight:700,color:tierColor,fontSize:12}}>{c.bestScore.toFixed(1)}</span>
