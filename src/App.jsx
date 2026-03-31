@@ -1111,13 +1111,13 @@ export default function App(){
                 <div style={{display:"flex",alignItems:"center",gap:4}}>
                   <span style={{fontSize:10,color:"#475569"}}>X軸:</span>
                   <div style={{display:"flex",background:"#0a0e1a",borderRadius:6,border:"1px solid #1e293b",overflow:"hidden"}}>
-                    {[{k:"ro40",l:"Ro40"},{k:"revGrowth",l:"売上成長"},{k:"opm",l:"営利率"},{k:"roe",l:"ROE"},{k:"roic",l:"ROIC"}].map(o=><button key={o.k} onClick={()=>setSxKey(o.k)} style={{padding:"3px 8px",border:"none",cursor:"pointer",fontSize:9,fontWeight:600,fontFamily:"inherit",background:sxKey===o.k?"#22d3ee18":"transparent",color:sxKey===o.k?"#22d3ee":"#64748b"}}>{o.l}</button>)}
+                    {[{k:"ro40",l:"Ro40"},{k:"revGrowth",l:"売上成長"},{k:"opm",l:"営利率"},{k:"roe",l:"ROE"},{k:"roic",l:"ROIC"},{k:"divYield",l:"配当"},{k:"eqR",l:"自己資本比率"},{k:"mcv",l:"時価総額"},{k:"per",l:"PER"},{k:"pbr",l:"PBR"},{k:"fcfYield",l:"FCF利回"}].map(o=><button key={o.k} onClick={()=>setSxKey(o.k)} style={{padding:"3px 8px",border:"none",cursor:"pointer",fontSize:9,fontWeight:600,fontFamily:"inherit",background:sxKey===o.k?"#22d3ee18":"transparent",color:sxKey===o.k?"#22d3ee":"#64748b"}}>{o.l}</button>)}
                   </div>
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:4}}>
                   <span style={{fontSize:10,color:"#475569"}}>Y軸:</span>
                   <div style={{display:"flex",background:"#0a0e1a",borderRadius:6,border:"1px solid #1e293b",overflow:"hidden"}}>
-                    {[{k:"psr",l:"PSR"},{k:"evs",l:"EV/Sales"},{k:"per",l:"PER"},{k:"evEbitda",l:"EV/EBITDA"},{k:"pbr",l:"PBR"}].map(o=><button key={o.k} onClick={()=>setSyKey(o.k)} style={{padding:"3px 8px",border:"none",cursor:"pointer",fontSize:9,fontWeight:600,fontFamily:"inherit",background:syKey===o.k?"#22d3ee18":"transparent",color:syKey===o.k?"#22d3ee":"#64748b"}}>{o.l}</button>)}
+                    {[{k:"psr",l:"PSR"},{k:"evs",l:"EV/Sales"},{k:"per",l:"PER"},{k:"evEbitda",l:"EV/EBITDA"},{k:"pbr",l:"PBR"},{k:"opm",l:"営利率"},{k:"roe",l:"ROE"},{k:"roic",l:"ROIC"},{k:"revGrowth",l:"売上成長"},{k:"divYield",l:"配当"},{k:"eqR",l:"自己資本比率"},{k:"fcfYield",l:"FCF利回"}].map(o=><button key={o.k} onClick={()=>setSyKey(o.k)} style={{padding:"3px 8px",border:"none",cursor:"pointer",fontSize:9,fontWeight:600,fontFamily:"inherit",background:syKey===o.k?"#22d3ee18":"transparent",color:syKey===o.k?"#22d3ee":"#64748b"}}>{o.l}</button>)}
                   </div>
                   {(syKey==="psr"||syKey==="per"||syKey==="evs")&&<div style={{display:"flex",background:"#0a0e1a",borderRadius:6,border:"1px solid #fbbf2430",overflow:"hidden"}}>
                     {[{k:0,l:"実績"},{k:1,l:"FY+1"},{k:2,l:"FY+2"}].map(o=><button key={o.k} onClick={()=>setFwdP(o.k)} style={{padding:"3px 8px",border:"none",cursor:"pointer",fontSize:9,fontWeight:600,fontFamily:"inherit",background:fwdP===o.k?"#fbbf2418":"transparent",color:fwdP===o.k?"#fbbf24":"#64748b"}}>{o.l}</button>)}
@@ -1133,15 +1133,22 @@ export default function App(){
               📊 Y軸: Fwd{fwdP} {syKey==="evs"?"EV/Sales":syKey.toUpperCase()} = {syKey==="evs"?"EV":"時価総額"} ÷ FY+{fwdP}{syKey==="per"?"純利":"売上"}推計値。{Object.keys(fwdEst).length>0?`${Object.keys(fwdEst).length}社コンセンサス取得済。`:"CAGR推計（直近マージン維持）を使用中。「📡コンセンサス一括取得」で上書き可能。"}
             </div>}
             {(()=>{
-              const xLabels={ro40:"Rule of 40スコア（%）",revGrowth:"売上成長率 3Y CAGR（%）",opm:"営業利益率（%）",roe:"ROE（%）",roic:"ROIC（%）"};
+              const xLabels={ro40:"Rule of 40スコア（%）",revGrowth:"売上成長率 3Y CAGR（%）",opm:"営業利益率（%）",roe:"ROE（%）",roic:"ROIC（%）",divYield:"配当利回り（%）",eqR:"自己資本比率（%）",mcv:"時価総額（億円）",per:"PER（倍）",pbr:"PBR（倍）",fcfYield:"FCF利回り（%）"};
               const fwdSuf=fwdP>0&&(syKey==="psr"||syKey==="per"||syKey==="evs")?`(Fwd${fwdP})`:"";
-              const yLabels={psr:`PSR${fwdSuf}（倍）`,evs:`EV/Sales${fwdSuf}（倍）`,per:`PER${fwdSuf}（倍）`,evEbitda:"EV/EBITDA（倍）",pbr:"PBR（倍）"};
-              const getX=(c)=>{
+              const yLabels={psr:`PSR${fwdSuf}（倍）`,evs:`EV/Sales${fwdSuf}（倍）`,per:`PER${fwdSuf}（倍）`,evEbitda:"EV/EBITDA（倍）",pbr:"PBR（倍）",opm:"営業利益率（%）",roe:"ROE（%）",roic:"ROIC（%）",revGrowth:"売上成長率 3Y CAGR（%）",divYield:"配当利回り（%）",eqR:"自己資本比率（%）",fcfYield:"FCF利回り（%）"};
+              const getVal=(c,key)=>{
                 const lr=c.rev[c.rev.length-1],lo=c.op[c.op.length-1];
                 const cg=calcCAGR(c.rev,3)||0;
                 const om=lr>0?lo/lr*100:0;
-                if(sxKey==="ro40")return cg+om;if(sxKey==="revGrowth")return cg;if(sxKey==="opm")return om;if(sxKey==="roe")return c.roe;if(sxKey==="roic")return c.roic;return 0;
+                const ev=c.mcv+(c.netDebt||0);
+                if(key==="ro40")return cg+om;if(key==="revGrowth")return cg;if(key==="opm")return om;
+                if(key==="roe")return c.roe;if(key==="roic")return c.roic;if(key==="divYield")return c.divYield;
+                if(key==="eqR")return c.eqR;if(key==="mcv")return c.mcv;if(key==="fcfYield")return c.fcfYield||0;
+                if(key==="per")return c.per===-999?0:c.per;if(key==="pbr")return c.pbr;
+                if(key==="psr")return c.psr;if(key==="evs")return lr>0?ev/lr:0;if(key==="evEbitda")return c.evEbitda<0?0:c.evEbitda;
+                return 0;
               };
+              const getX=(c)=>{return getVal(c,sxKey);};
               const getY=(c)=>{
                 const ev=c.mcv+(c.netDebt||0);
                 if(fwdP>0&&(syKey==="psr"||syKey==="per"||syKey==="evs")){
@@ -1153,9 +1160,10 @@ export default function App(){
                   }
                   return 0;
                 }
-                if(syKey==="psr")return c.psr;if(syKey==="evs"){const lr=c.rev[c.rev.length-1];return lr>0?ev/lr:0;}if(syKey==="per")return c.per===-999?0:c.per;if(syKey==="evEbitda")return c.evEbitda<0?0:c.evEbitda;if(syKey==="pbr")return c.pbr;return 0;
+                return getVal(c,syKey);
               };
-              const dots=comps.map(code=>{const c=mc[code];if(!c)return null;return{code:c.code,name:c.name,x:getX(c),y:getY(c),isSel:c.code===sel};}).filter(Boolean).filter(d=>d.y>0);
+              const valMetrics=new Set(["psr","evs","per","evEbitda","pbr","mcv"]);
+              const dots=comps.map(code=>{const c=mc[code];if(!c)return null;return{code:c.code,name:c.name,x:getX(c),y:getY(c),isSel:c.code===sel};}).filter(Boolean).filter(d=>valMetrics.has(syKey)?d.y>0:true);
               if(dots.length<2)return <p style={{color:"#475569",fontSize:12}}>2社以上選択してください（Y軸=0の企業は除外）</p>;
               const xVals=dots.map(d=>d.x),yVals=dots.map(d=>d.y);
               const xPad=(Math.max(...xVals)-Math.min(...xVals))*0.15||10;
