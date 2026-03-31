@@ -81,7 +81,7 @@ async function edinetFetch(path, apiKey) {
   return json.data !== undefined ? json.data : json; // unwrap envelope
 }
 function edinetToMc(co, fin, rat, sh) {
-  const secCode = (co.sec_code||"").replace(/0$/, "") || co.edinet_code;
+  const secCode = (co.sec_code||co.secCode||"").replace(/0$/, "") || co.edinet_code||co.edinetCode;
   const fS = [...(fin||[])].filter(f=>f.fiscal_year).sort((a,b)=>a.fiscal_year-b.fiscal_year).slice(-5);
   const rAll = [...(rat||[])].filter(r=>r.fiscal_year).sort((a,b)=>b.fiscal_year-a.fiscal_year);
   const rL = rAll[0] || {};
@@ -91,17 +91,18 @@ function edinetToMc(co, fin, rat, sh) {
   const holders=(sh||[]).slice(0,6).map(h=>({name:h.holder_name||h.filer_name||"不明",pct:h.holding_ratio||h.share_ratio||0}));
   const lF=fS[fS.length-1]||{}, lR=oku(lF.revenue)||1;
   const mcv=rL.market_cap?Math.round(rL.market_cap/100000000):(rL.stock_price&&lF.shares_issued?Math.round(rL.stock_price*lF.shares_issued/100000000):0);
-  const pct = v => v!=null ? +(v*100).toFixed(1) : 0; // 0.12 → 12.0
-  return {code:secCode,name:(co.filer_name||co.name||"").replace(/株式会社/g,"").trim(),nameEn:co.name_en||co.filer_name_en||"",sector:co.industry||"不明",
+  const pct = v => v!=null ? +(v*100).toFixed(1) : 0;
+  const coName = (co.filer_name||co.filerName||co.name||"").replace(/株式会社/g,"").trim();
+  return {code:secCode,name:coName,nameEn:co.name_en||co.filer_name_en||co.nameEn||"",sector:co.industry||"不明",
     price:rL.stock_price||0,change:0,marketCap:mcv>=10000?`${(mcv/10000).toFixed(2)}兆円`:`${mcv.toLocaleString()}億円`,mcv,
-    per:rL.per||-999,pbr:rL.pbr||0,roe:rL.roe!=null?pct(rL.roe):0,divYield:rL.dividend_yield!=null?pct(rL.dividend_yield):0,
+    per:rL.per||-999,pbr:rL.pbr||0,roe:rL.roe!=null?pct(rL.roe):(co.roe?+(co.roe).toFixed(1):0),divYield:rL.dividend_yield!=null?pct(rL.dividend_yield):0,
     psr:lR>0&&mcv>0?+(mcv/lR).toFixed(1):0,evEbitda:rL.ebitda&&mcv?+(mcv*100000000/rL.ebitda).toFixed(1):0,
     fcf:oku(lF.cf_operating)+oku(lF.cf_investing),fcfYield:0,
     roic:rL.roic!=null?pct(rL.roic):0,eqR:rL.equity_ratio!=null?pct(rL.equity_ratio):(rL.equity_ratio_official!=null?pct(rL.equity_ratio_official):0),
     deR:rL.de_ratio||0,netDebt:rL.net_debt?oku(rL.net_debt):0,icr:0,
     cr:rL.current_ratio!=null?+(rL.current_ratio).toFixed(1):0,qr:0,rev,op,np,yrs,
     segs:[{name:co.industry||"主要事業",pct:100}],holders:holders.length>0?holders:[{name:"情報なし",pct:0}],
-    fetched:Date.now(),source:"EDINET_DB",edinetCode:co.edinet_code};
+    fetched:Date.now(),source:"EDINET_DB",edinetCode:co.edinet_code||co.edinetCode};
 }
 async function fetchFromEdinet(q, apiKey) {
   // search is auth-free, but we pass key anyway
@@ -125,9 +126,10 @@ async function edinetScreener(apiKey, params, industry, limit=50) {
   // Use shorthand format: roe_gte=15, market_cap_gte=100000000000
   if(params)Object.entries(params).forEach(([k,v])=>{u+=`&${k}=${v}`;});
   const r=await edinetFetch(u,apiKey);
-  // Response: {data: {companies: [...], total: N}}
-  const d=r.companies||r;
-  return Array.isArray(d)?d:[];
+  // edinetFetch unwraps {data:X}→X, so r = {companies:[...], total:N}
+  if(r&&r.companies)return r.companies;
+  if(Array.isArray(r))return r;
+  return [];
 }
 
 const DISCL = [
@@ -339,7 +341,8 @@ export default function App(){
       const results=[];
       for(const co of companies.slice(0,limit)){
         try{
-          const ec=co.edinet_code;
+          const ec=co.edinet_code||co.edinetCode;
+          if(!ec){console.warn("Skip: no edinetCode",co);continue;}
           const [fin,rat]=await Promise.all([
             edinetFetch(`/companies/${ec}/financials`,edinetKey).catch(()=>[]),
             edinetFetch(`/companies/${ec}/ratios`,edinetKey).catch(()=>[]),
@@ -348,7 +351,7 @@ export default function App(){
           const ratArr=Array.isArray(rat)?rat:[];
           const d=edinetToMc(co,finArr,ratArr,[]);
           if(d.rev&&d.rev.length>0&&d.rev.some(v=>v>0))results.push(d);
-        }catch(e){console.warn("Skip:",co.filer_name||co.name,e.message);}
+        }catch(e){console.warn("Skip:",co.filer_name||co.filerName||co.name,e.message);}
       }
       setMc(prev=>{const n={...prev};results.forEach(d=>{n[d.code]=d;});return n;});
       setBulkImport({loading:false,results,error:null});
